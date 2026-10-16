@@ -1,25 +1,13 @@
 
-import { Request, Response } from "express";
-import mongoose, { Types } from "mongoose";
+import type { Request, Response } from "express";
 import Product from "../models/Product";
 import StockMovement from "../models/StockMovement";
 import { asyncHandler } from "../utils/asyncHandler";
 
 export const getAiInsights = asyncHandler(
-  async (req: Request, res: Response) => {
-    const userId = req.user?.id;
-
-    if (!userId || !mongoose.isValidObjectId(userId)) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required.",
-      });
-    }
-
-    const ownerId = new Types.ObjectId(userId);
-
-    // Only analyze products belonging to the authenticated user.
-    const products = await Product.find({ userId: ownerId })
+  async (_req: Request, res: Response) => {
+    // Public endpoint: analyzes all inventory data.
+    const products = await Product.find({})
       .select("name sku category price quantity minStock")
       .lean();
 
@@ -29,13 +17,10 @@ export const getAiInsights = asyncHandler(
       adjustmentCount,
       recentMovements,
     ] = await Promise.all([
-      StockMovement.countDocuments({ userId: ownerId, type: "IN" }),
-      StockMovement.countDocuments({ userId: ownerId, type: "OUT" }),
-      StockMovement.countDocuments({
-        userId: ownerId,
-        type: "ADJUSTMENT",
-      }),
-      StockMovement.find({ userId: ownerId })
+      StockMovement.countDocuments({ type: "IN" }),
+      StockMovement.countDocuments({ type: "OUT" }),
+      StockMovement.countDocuments({ type: "ADJUSTMENT" }),
+      StockMovement.find({})
         .sort({ createdAt: -1 })
         .limit(5)
         .populate("productId", "name sku")
@@ -99,7 +84,21 @@ export const getAiInsights = asyncHandler(
       .map(([name, data]) => ({ name, ...data }))
       .sort((a, b) => b.inventoryValue - a.inventoryValue);
 
-    const insights = [];
+    const insights: {
+      id: string;
+      type: string;
+      category: string;
+      title: string;
+      description: string;
+      recommendation: string;
+      product?: {
+        _id: unknown;
+        name: string;
+        sku: string;
+        quantity: number;
+        minStock: number;
+      };
+    }[] = [];
 
     for (const product of lowStockProducts) {
       const isOutOfStock = Number(product.quantity) <= 0;
