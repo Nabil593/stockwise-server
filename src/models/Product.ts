@@ -1,13 +1,8 @@
+
 import mongoose, { Schema } from "mongoose";
 
 const productSchema = new Schema(
   {
-    userId: {
-      type: String,
-      required: true,
-      index: true,
-    },
-
     name: {
       type: String,
       required: [true, "Product name is required"],
@@ -69,10 +64,8 @@ const productSchema = new Schema(
   },
 );
 
-productSchema.index(
-  { userId: 1, sku: 1 },
-  { unique: true },
-);
+// SKU must be unique across the shared inventory.
+productSchema.index({ sku: 1 }, { unique: true });
 
 const Product =
   mongoose.models.Product ||

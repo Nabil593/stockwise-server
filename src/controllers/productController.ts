@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose";
 import type { Request, Response } from "express";
 import Product from "../models/Product.js";
@@ -36,14 +37,11 @@ function validateProductBody(
   const errors: string[] = [];
 
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return {
-      errors: ["Request body must be a JSON object"],
-    };
+    return { errors: ["Request body must be a JSON object"] };
   }
 
   const input = body as Record<string, unknown>;
   const data: Record<string, unknown> = {};
-
   const fieldsToCheck = isUpdate ? Object.keys(input) : [...allowedFields];
 
   if (isUpdate && fieldsToCheck.length === 0) {
@@ -59,9 +57,7 @@ function validateProductBody(
     const value = input[field];
 
     if (value === undefined) {
-      if (!isUpdate) {
-        errors.push(`${field} is required`);
-      }
+      if (!isUpdate) errors.push(`${field} is required`);
       continue;
     }
 
@@ -75,9 +71,7 @@ function validateProductBody(
       } else {
         data.name = value.trim();
       }
-    }
-
-    if (field === "sku") {
+    } else if (field === "sku") {
       if (
         typeof value !== "string" ||
         !/^[a-zA-Z0-9_-]{1,64}$/.test(value.trim())
@@ -88,9 +82,7 @@ function validateProductBody(
       } else {
         data.sku = value.trim().toUpperCase();
       }
-    }
-
-    if (field === "category") {
+    } else if (field === "category") {
       if (
         typeof value !== "string" ||
         !allowedCategories.includes(value as (typeof allowedCategories)[number])
@@ -99,18 +91,22 @@ function validateProductBody(
       } else {
         data.category = value;
       }
-    }
-
-    if (field === "description") {
+    } else if (field === "description") {
       if (typeof value !== "string" || value.length > 500) {
         errors.push("Description must be a string of at most 500 characters");
       } else {
         data.description = value;
       }
-    }
-
-    if (field === "price" || field === "quantity" || field === "minStock") {
-      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    } else if (
+      field === "price" ||
+      field === "quantity" ||
+      field === "minStock"
+    ) {
+      if (
+        typeof value !== "number" ||
+        !Number.isFinite(value) ||
+        value < 0
+      ) {
         errors.push(`${field} must be a non-negative number`);
       } else if (
         (field === "quantity" || field === "minStock") &&
@@ -129,10 +125,7 @@ function validateProductBody(
 // GET /api/products
 export const listProducts = asyncHandler(
   async (req: Request, res: Response) => {
-    const userId = req.user!.id;
-
     const page = Math.max(1, Number(req.query.page) || 1);
-
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
 
     const search =
@@ -141,7 +134,7 @@ export const listProducts = asyncHandler(
     const category =
       typeof req.query.category === "string" ? req.query.category : "";
 
-    const filter: Record<string, unknown> = { userId };
+    const filter: Record<string, unknown> = {};
 
     if (category) {
       filter.category = category;
@@ -162,7 +155,6 @@ export const listProducts = asyncHandler(
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
-
       Product.countDocuments(filter),
     ]);
 
@@ -180,35 +172,34 @@ export const listProducts = asyncHandler(
 );
 
 // GET /api/products/:productId
-export const getProduct = asyncHandler(async (req: Request, res: Response) => {
-  const { productId } = req.params;
+export const getProduct = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { productId } = req.params;
 
-  if (typeof productId !== "string" || !isValidObjectId(productId)) {
-    res.status(400).json({
-      success: false,
-      message: "Invalid product ID",
+    if (typeof productId !== "string" || !isValidObjectId(productId)) {
+      res.status(400).json({
+        success: false,
+        message: "Invalid product ID",
+      });
+      return;
+    }
+
+    const product = await Product.findById(productId).lean();
+
+    if (!product) {
+      res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: product,
     });
-    return;
-  }
-
-  const product = await Product.findOne({
-    _id: productId,
-    userId: req.user!.id,
-  }).lean();
-
-  if (!product) {
-    res.status(404).json({
-      success: false,
-      message: "Product not found",
-    });
-    return;
-  }
-
-  res.json({
-    success: true,
-    data: product,
-  });
-});
+  },
+);
 
 // POST /api/products
 export const createProduct = asyncHandler(
@@ -224,10 +215,7 @@ export const createProduct = asyncHandler(
       return;
     }
 
-    const product = await Product.create({
-      ...validation.data,
-      userId: req.user!.id,
-    });
+    const product = await Product.create(validation.data as Record<string, unknown>);
 
     res.status(201).json({
       success: true,
@@ -261,18 +249,10 @@ export const updateProduct = asyncHandler(
       return;
     }
 
-    const product = await Product.findOneAndUpdate(
-      {
-        _id: productId,
-        userId: req.user!.id,
-      },
-      {
-        $set: validation.data,
-      },
-      {
-        new: true,
-        runValidators: true,
-      },
+    const product = await Product.findByIdAndUpdate(
+      productId,
+      { $set: validation.data },
+      { new: true, runValidators: true },
     );
 
     if (!product) {
@@ -304,10 +284,7 @@ export const deleteProduct = asyncHandler(
       return;
     }
 
-    const product = await Product.findOneAndDelete({
-      _id: productId,
-      userId: req.user!.id,
-    });
+    const product = await Product.findByIdAndDelete(productId);
 
     if (!product) {
       res.status(404).json({
