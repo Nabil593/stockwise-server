@@ -1,3 +1,4 @@
+
 import type { Request, Response } from "express";
 import mongoose, { Types } from "mongoose";
 import Product from "../models/Product";
@@ -8,15 +9,12 @@ type MovementType = "IN" | "OUT" | "ADJUSTMENT";
 
 const validTypes: MovementType[] = ["IN", "OUT", "ADJUSTMENT"];
 
-const getUserId = (req: Request): string => req.user!.id;
-
 const isValidObjectId = (id: string): boolean =>
   mongoose.isValidObjectId(id);
 
 // POST /api/stock/movements
 export const createStockMovement = asyncHandler(
   async (req: Request, res: Response) => {
-    const userId = getUserId(req);
     const { productId, type, quantity, reason, notes } = req.body;
 
     if (
@@ -75,11 +73,8 @@ export const createStockMovement = asyncHandler(
 
     const productObjectId = new Types.ObjectId(productId);
 
-    // Product must belong to the currently authenticated user.
-    const product = await Product.findOne({
-      _id: productObjectId,
-      userId,
-    });
+    // Public access: find product without user authentication.
+    const product = await Product.findById(productObjectId);
 
     if (!product) {
       res.status(404).json({
@@ -90,7 +85,6 @@ export const createStockMovement = asyncHandler(
     }
 
     const quantityBefore = product.quantity;
-
     let quantityAfter: number;
 
     if (type === "IN") {
@@ -106,7 +100,7 @@ export const createStockMovement = asyncHandler(
 
       quantityAfter = quantityBefore - quantity;
     } else {
-      // For ADJUSTMENT, quantity means the new total stock quantity.
+      // ADJUSTMENT quantity represents the new total stock.
       quantityAfter = quantity;
     }
 
@@ -118,21 +112,14 @@ export const createStockMovement = asyncHandler(
       return;
     }
 
-    // Conditional update prevents an OUT movement from overselling
-    // if another request changes the stock at the same time.
+    // Update stock only if the original quantity has not changed.
     const updatedProduct = await Product.findOneAndUpdate(
       {
         _id: productObjectId,
-        userId,
-        quantity:
-          type === "OUT"
-            ? { $gte: quantity }
-            : quantityBefore,
+        quantity: quantityBefore,
       },
       {
-        $set: {
-          quantity: quantityAfter,
-        },
+        $set: { quantity: quantityAfter },
       },
       {
         new: true,
@@ -150,10 +137,8 @@ export const createStockMovement = asyncHandler(
 
     try {
       const movement = await StockMovement.create({
-        userId: new Types.ObjectId(userId),
         productId: productObjectId,
         type,
-        // For ADJUSTMENT, quantity is the new stock total.
         quantity,
         quantityBefore,
         quantityAfter,
@@ -163,7 +148,7 @@ export const createStockMovement = asyncHandler(
 
       const populatedMovement = await StockMovement.findById(
         movement._id,
-      ).populate("productId", "name sku");
+      ).populate("productId", "name sku category");
 
       res.status(201).json({
         success: true,
@@ -171,18 +156,14 @@ export const createStockMovement = asyncHandler(
         data: populatedMovement,
       });
     } catch (error) {
-      // Compensate if recording the movement fails.
-      // Only restore if this request's quantity is still current.
+      // Restore the previous stock if movement creation fails.
       await Product.updateOne(
         {
           _id: productObjectId,
-          userId,
           quantity: quantityAfter,
         },
         {
-          $set: {
-            quantity: quantityBefore,
-          },
+          $set: { quantity: quantityBefore },
         },
       );
 
@@ -194,15 +175,13 @@ export const createStockMovement = asyncHandler(
 // GET /api/stock/movements
 export const getStockMovements = asyncHandler(
   async (req: Request, res: Response) => {
-    const userId = getUserId(req);
-
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(
       100,
       Math.max(1, Number(req.query.limit) || 50),
     );
 
-    const filter: Record<string, unknown> = { userId };
+    const filter: Record<string, unknown> = {};
 
     if (typeof req.query.type === "string") {
       if (!validTypes.includes(req.query.type as MovementType)) {
@@ -228,6 +207,8 @@ export const getStockMovements = asyncHandler(
       filter.productId = new Types.ObjectId(req.query.productId);
     }
 
+    const createdAt: Record<string, Date> = {};
+
     if (typeof req.query.from === "string") {
       const from = new Date(req.query.from);
 
@@ -239,10 +220,7 @@ export const getStockMovements = asyncHandler(
         return;
       }
 
-      filter.createdAt = {
-        ...(filter.createdAt as object | undefined),
-        $gte: from,
-      };
+      createdAt.$gte = from;
     }
 
     if (typeof req.query.to === "string") {
@@ -256,19 +234,16 @@ export const getStockMovements = asyncHandler(
         return;
       }
 
-      filter.createdAt = {
-        ...(filter.createdAt as object | undefined),
-        $lte: to,
-      };
+      createdAt.$lte = to;
+    }
+
+    if (Object.keys(createdAt).length > 0) {
+      filter.createdAt = createdAt;
     }
 
     const [movements, total] = await Promise.all([
       StockMovement.find(filter)
-        .populate({
-          path: "productId",
-          select: "name sku category",
-          match: { userId },
-        })
+        .populate("productId", "name sku category")
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -292,17 +267,10 @@ export const getStockMovements = asyncHandler(
 
 // GET /api/stock/summary
 export const getStockSummary = asyncHandler(
-  async (req: Request, res: Response) => {
-    const userId = getUserId(req);
-
+  async (_req: Request, res: Response) => {
     const [productStats, movementStats, lowStockCount] =
       await Promise.all([
         Product.aggregate([
-          {
-            $match: {
-              userId: new Types.ObjectId(userId),
-            },
-          },
           {
             $group: {
               _id: null,
@@ -317,11 +285,6 @@ export const getStockSummary = asyncHandler(
 
         StockMovement.aggregate([
           {
-            $match: {
-              userId: new Types.ObjectId(userId),
-            },
-          },
-          {
             $group: {
               _id: "$type",
               count: { $sum: 1 },
@@ -331,7 +294,6 @@ export const getStockSummary = asyncHandler(
         ]),
 
         Product.countDocuments({
-          userId,
           $expr: { $lte: ["$quantity", "$minStock"] },
         }),
       ]);
@@ -342,17 +304,17 @@ export const getStockSummary = asyncHandler(
       inventoryValue: 0,
     };
 
-    const movementSummary = {
+    const movements = {
       stockIn: 0,
       stockOut: 0,
       adjustments: 0,
     };
 
     for (const item of movementStats) {
-      if (item._id === "IN") movementSummary.stockIn = item.count;
-      if (item._id === "OUT") movementSummary.stockOut = item.count;
+      if (item._id === "IN") movements.stockIn = item.count;
+      if (item._id === "OUT") movements.stockOut = item.count;
       if (item._id === "ADJUSTMENT") {
-        movementSummary.adjustments = item.count;
+        movements.adjustments = item.count;
       }
     }
 
@@ -363,7 +325,7 @@ export const getStockSummary = asyncHandler(
         totalUnits: stats.totalUnits,
         inventoryValue: stats.inventoryValue,
         lowStockCount,
-        movements: movementSummary,
+        movements,
       },
     });
   },
