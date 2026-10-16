@@ -1,31 +1,22 @@
+
 import type { Request, Response, NextFunction } from "express";
 import Product from "../models/Product.js";
 import StockMovement from "../models/StockMovement.js";
 
 export const getDashboardOverview = async (
-  req: Request,
+  _req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
-    // Assumption: requireAuth adds the authenticated user's ID to req.user.
-    const userId = (req as any).user?.id || (req as any).user?._id;
-
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized",
-      });
-    }
-
-    const products = await Product.find({ userId })
+    const products = await Product.find({})
       .select("name sku category price quantity minStock")
       .lean();
 
     const totalProducts = products.length;
 
     const summary = products.reduce(
-      (acc, product: any) => {
+      (acc, product) => {
         const quantity = Number(product.quantity) || 0;
         const price = Number(product.price) || 0;
         const minStock = Number(product.minStock) || 0;
@@ -46,7 +37,7 @@ export const getDashboardOverview = async (
         inventoryValue: 0,
         lowStockCount: 0,
         outOfStockCount: 0,
-      }
+      },
     );
 
     const categoryMap = new Map<
@@ -54,7 +45,7 @@ export const getDashboardOverview = async (
       { productCount: number; totalUnits: number; inventoryValue: number }
     >();
 
-    for (const product of products as any[]) {
+    for (const product of products) {
       const category = product.category || "Other";
       const quantity = Number(product.quantity) || 0;
       const price = Number(product.price) || 0;
@@ -76,7 +67,7 @@ export const getDashboardOverview = async (
       ([name, values]) => ({
         name,
         ...values,
-      })
+      }),
     );
 
     // Last 7 days, including today.
@@ -85,7 +76,6 @@ export const getDashboardOverview = async (
     startDate.setDate(startDate.getDate() - 6);
 
     const movements = await StockMovement.find({
-      userId,
       createdAt: { $gte: startDate },
     })
       .select("type quantity createdAt productId reason")
@@ -119,16 +109,12 @@ export const getDashboardOverview = async (
     let stockOut = 0;
     let adjustments = 0;
 
-    for (const movement of movements as any[]) {
+    for (const movement of movements) {
       const quantity = Number(movement.quantity) || 0;
 
-      if (movement.type === "IN") {
-        stockIn += quantity;
-      } else if (movement.type === "OUT") {
-        stockOut += quantity;
-      } else if (movement.type === "ADJUSTMENT") {
-        adjustments += quantity;
-      }
+      if (movement.type === "IN") stockIn += quantity;
+      else if (movement.type === "OUT") stockOut += quantity;
+      else if (movement.type === "ADJUSTMENT") adjustments += quantity;
 
       const createdAt = new Date(movement.createdAt);
       const key = [
@@ -145,21 +131,21 @@ export const getDashboardOverview = async (
       }
     }
 
-    const recentMovements = await StockMovement.find({ userId })
+    const recentMovements = await StockMovement.find({})
       .select("type quantity createdAt productId reason")
       .populate("productId", "name sku")
       .sort({ createdAt: -1 })
       .limit(5)
       .lean();
 
-    const lowStockProducts = products.filter((product: any) => {
+    const lowStockProducts = products.filter((product) => {
       const quantity = Number(product.quantity) || 0;
       const minStock = Number(product.minStock) || 0;
       return quantity > 0 && quantity <= minStock;
     });
 
     const outOfStockProducts = products.filter(
-      (product: any) => (Number(product.quantity) || 0) <= 0
+      (product) => (Number(product.quantity) || 0) <= 0,
     );
 
     return res.status(200).json({
