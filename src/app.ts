@@ -16,7 +16,7 @@ app.use(
 
 app.use(express.json({ limit: "20kb" }));
 
-app.get("/api/health", (_req, res) => {
+app.get("/", (_req, res) => {
   res.json({
     success: true,
     message: "Inventory API is running",
@@ -24,10 +24,9 @@ app.get("/api/health", (_req, res) => {
 });
 
 import productRoutes from "./routes/productRoutes.js";
-import { requireAuth } from "./middlewares/requireAuth.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 
-app.use("/api/products", requireAuth, productRoutes);
+app.use("/api/products", productRoutes);
 app.use(errorHandler);
 
 import stockMovementRoutes from "./routes/stockMovementRoutes";
