@@ -19,7 +19,7 @@ const stockMovementSchema = new Schema<IStockMovement>(
   {
     userId: {
       type: Schema.Types.ObjectId,
-      required: true,
+      required: false,
       index: true,
     },
 
